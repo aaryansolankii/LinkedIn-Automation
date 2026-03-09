@@ -11,8 +11,6 @@ __pycache__/
 *.pyo
 *.pyd
 
-# Application Data
-content_db.xlsx
 
 # Debug and output logs
 *.log
