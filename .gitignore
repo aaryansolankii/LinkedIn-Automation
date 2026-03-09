@@ -1,0 +1,39 @@
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+
+# Python caching
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Application Data
+content_db.xlsx
+
+# Debug and output logs
+*.log
+*.txt
+out.txt
+test_gen_out.txt
+debug_output.txt
+introspect_output.txt
+match.txt
+test_results.txt
+test_new_token.txt
+token_test.txt
+
+# Standalone Test Scripts & Helpers we used for debugging
+test_*.py
+debug_*.py
+get_token.py
+get_urn.py
+get_urn_web.py
+introspect.py
+
+# OS generated files
+.DS_Store
+Thumbs.db
