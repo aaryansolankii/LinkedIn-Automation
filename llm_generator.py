@@ -7,7 +7,7 @@ import logging
 import re
 from typing import Any
 
-import google.generativeai as genai
+from google import genai
 
 from config import get_settings
 
@@ -31,11 +31,10 @@ Example format:
 """
 
 
-def _build_model() -> genai.GenerativeModel:
-    """Create an authenticated Gemini model instance."""
+def _build_client() -> genai.Client:
+    """Create an authenticated Gemini client."""
     settings = get_settings()
-    genai.configure(api_key=settings.gemini_api_key)
-    return genai.GenerativeModel(settings.gemini_model)
+    return genai.Client(api_key=settings.gemini_api_key)
 
 
 def _parse_idea_json(raw_text: str) -> list[dict[str, str]]:
@@ -91,10 +90,13 @@ def generate_ideas(niche: str, days: int = 30) -> list[dict[str, str]]:
         raise ValueError("days must be greater than 0.")
 
     prompt = IDEA_PROMPT_TEMPLATE.format(niche=niche, days=days)
-    model = _build_model()
+    client = _build_client()
     logger.info("Generating %s ideas for niche: %s", days, niche)
 
-    response = model.generate_content(prompt)
+    response = client.models.generate_content(
+        model=get_settings().gemini_model,
+        contents=prompt,
+    )
     raw_text = (response.text or "").strip()
     ideas = _parse_idea_json(raw_text)
 

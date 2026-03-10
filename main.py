@@ -129,13 +129,18 @@ def reject_post(id: int = Query(..., ge=1)) -> dict[str, str | int]:
 
     try:
         update_cell(id, "approved", "rejected")
-        regenerated_post = generate_post(title=title, hook=hook, about=about)
+        regenerated_post, image_prompt = generate_post(title=title, hook=hook, about=about)
+        from image_generator import generate_and_save_image
+        image_path = generate_and_save_image(title=title, topic=about, image_prompt=image_prompt)
+        
         update_cell(id, "post_content", regenerated_post)
+        update_cell(id, "image_path", image_path)
         send_approval_email(
             row_number=id,
             title=title,
             hook=hook,
             generated_post=regenerated_post,
+            image_path=image_path
         )
     except Exception as exc:
         logger.exception("Failed rejection-regeneration flow for row %s.", id)
@@ -190,6 +195,19 @@ def trigger_scheduler_endpoint() -> dict[str, str]:
     except Exception as exc:
         logger.exception("Failed manual scheduler check.")
         raise HTTPException(status_code=500, detail="Failed to run scheduler check.") from exc
+
+
+@app.post("/api/trigger-publish")
+def trigger_publish_endpoint() -> dict[str, str]:
+    """Manually trigger the queued post publishing sweep for testing."""
+    logger.info("Manual publish sweep triggered via API.")
+    try:
+        from scheduler import publish_queued_posts
+        publish_queued_posts()
+        return {"status": "success", "message": "Publish sweep ran successfully."}
+    except Exception as exc:
+        logger.exception("Failed manual publish sweep.")
+        raise HTTPException(status_code=500, detail="Failed to run publish sweep.") from exc
 
 
 def _validate_python_version() -> None:

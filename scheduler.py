@@ -55,14 +55,19 @@ def check_daily_posts() -> None:
         about = str(row.get("about", "")).strip()
 
         try:
-            generated_post = generate_post(title=title, hook=hook, about=about)
+            generated_post, image_prompt = generate_post(title=title, hook=hook, about=about)
+            from image_generator import generate_and_save_image
+            image_path = generate_and_save_image(title=title, topic=about, image_prompt=image_prompt)
+            
             update_cell(row_number, "post_content", generated_post)
+            update_cell(row_number, "image_path", image_path)
             update_cell(row_number, "approved", "pending")
             send_approval_email(
                 row_number=row_number,
                 title=title,
                 hook=hook,
                 generated_post=generated_post,
+                image_path=image_path
             )
             processed_count += 1
             logger.info("Generated post content and sent approval for row %s.", row_number)
@@ -93,13 +98,14 @@ def publish_queued_posts() -> None:
         approved_status = str(row.get("approved", "")).strip().lower()
         posted_status = str(row.get("posted", "")).strip().lower()
         post_content = str(row.get("post_content", "")).strip()
+        image_path = str(row.get("image_path", "")).strip()
 
         # Only process rows that have been approved (queued for posting) but not yet posted
         if approved_status == "queued" and posted_status != "yes" and post_content:
             logger.info("Publishing queued post on row %s...", row_number)
             try:
                 # Attempt to publish
-                posted = post_to_linkedin(post_content)
+                posted = post_to_linkedin(post_content, image_path)
                 if posted:
                     update_cell(row_number, "posted", "yes")
                     update_cell(row_number, "approved", "yes") # update queued to yes

@@ -1,37 +1,43 @@
-# Environments
+# ── Secrets ──────────────────────────────────────────────────────────────────
 .env
-.venv
-env/
-venv/
-ENV/
+.env.*
+!.env.example          # keep the example template in git
 
-# Python caching
+# ── Python ────────────────────────────────────────────────────────────────────
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
 
+# ── Virtual environments ───────────────────────────────────────────────────────
+venv/
+.venv/
+env/
+ENV/
 
-# Debug and output logs
-*.log
-*.txt
-out.txt
-test_gen_out.txt
-debug_output.txt
-introspect_output.txt
-match.txt
-test_results.txt
-test_new_token.txt
-token_test.txt
+# ── Project data & generated content ─────────────────────────────────────────
+content_db.xlsx        # live database — never commit real user data
+generated_images/      # AI-generated images can be large
 
-# Standalone Test Scripts & Helpers we used for debugging
+# ── Debug / test scripts & output files ───────────────────────────────────────
 test_*.py
 debug_*.py
+*.log
+*.txt
+
+# ── LinkedIn token helpers (used once for setup, not part of the system) ──────
 get_token.py
 get_urn.py
 get_urn_web.py
 introspect.py
+debug_token.py
+test_new_token.py
+test_versions.py
+test_li.py
+test_post.py
+test_gemini_models.py
+test_gemini_rest.py
 
-# OS generated files
+# ── OS generated ───────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
