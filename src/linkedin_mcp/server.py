@@ -11,8 +11,8 @@ from mcp.server.mcpserver import Image, MCPServer
 from mcp_types import ToolAnnotations
 from pydantic import BaseModel, Field
 
-from . import auth, cards, linkedin, store
-from .config import DATA_DIR, ENV_FILE, get_settings, load_credentials
+from . import auth, cards, images, linkedin, store
+from .config import DATA_DIR, ENV_FILE, STORAGE, get_settings, load_credentials
 from .errors import LinkedInError
 
 logger = logging.getLogger(__name__)
@@ -113,10 +113,11 @@ def linkedin_status() -> dict[str, Any]:
     credentials = load_credentials()
     account: dict[str, Any] = {"connected": False}
     if credentials is None:
+        where = "the Cloud Run service (see deploy.md)" if auth.is_hosted() else str(ENV_FILE)
         account["next_step"] = (
             "Call linkedin_login."
             if settings.client_id and settings.client_secret
-            else f"Add LINKEDIN_CLIENT_ID and LINKEDIN_CLIENT_SECRET to {ENV_FILE}, then call linkedin_login."
+            else f"Add LINKEDIN_CLIENT_ID and LINKEDIN_CLIENT_SECRET to {where}, then call linkedin_login."
         )
     elif credentials.is_expired():
         account.update(problem=f"Token expired on {credentials.expires_at}.", next_step="Call linkedin_login.")
@@ -139,19 +140,19 @@ def linkedin_status() -> dict[str, Any]:
         "calendar": store.status_counts(),
         "scheduled_and_due": len(store.due_posts(store.now())),
         "default_posting_time": settings.posting_time,
-        "data_dir": str(DATA_DIR),
+        "storage": "Firestore" if STORAGE == "firestore" else str(DATA_DIR),
     }
 
 
 @mcp.tool(annotations=ToolAnnotations(openWorldHint=True))
 def linkedin_login() -> dict[str, str]:
-    """Connect a LinkedIn account: opens LinkedIn's consent page in the browser and saves the token once the user approves. Tokens last about 60 days; log in again when one expires."""
-    flow = auth.start_login()
+    """Connect a LinkedIn account: returns LinkedIn's consent page URL (opened in the browser when running locally) and saves the token once the user approves. Tokens last about 60 days; log in again when one expires."""
+    url = auth.login_url()
+    how = "by opening login_url" if auth.is_hosted() else "in the browser tab that opened (or by opening login_url)"
     return {
         "status": "waiting_for_browser",
-        "login_url": flow.url,
-        "next_step": "Ask the user to approve access in the browser tab that opened (or to open login_url), "
-        "then call linkedin_status to confirm.",
+        "login_url": url,
+        "next_step": f"Ask the user to approve access {how}, then call linkedin_status to confirm.",
     }
 
 
@@ -214,7 +215,7 @@ def save_post(
         if value is not None
     }
     if image_path is not None:
-        fields["image_path"] = str(linkedin.check_image(image_path)) if image_path.strip() else ""
+        fields["image_path"] = images.validate(image_path.strip()) if image_path.strip() else ""
     if publish_at is not None:
         fields["publish_at"] = store.normalize_time(publish_at, get_settings().posting_time)
 
@@ -292,9 +293,10 @@ def make_post_image(
     post_id: Annotated[int | None, Field(description="Attach the image to this post.")] = None,
 ) -> list[Any]:
     """Render a square title-card image (soft gradient, bold headline) and optionally attach it to a post. Returns a preview."""
-    path = cards.render_title_card(title.strip(), subtitle.strip(), eyebrow.strip(), author.strip(), theme)
-    message = f"Saved {path}"
+    png = cards.render_title_card(title.strip(), subtitle.strip(), eyebrow.strip(), author.strip(), theme)
+    image_ref = images.save_card(png)
+    message = f"Saved {image_ref}"
     if post_id is not None:
-        save_post(post_id=post_id, image_path=str(path))
+        save_post(post_id=post_id, image_path=image_ref)
         message += f" and attached it to post {post_id}"
-    return [message, Image(data=cards.preview_jpeg(path), format="jpeg")]
+    return [message, Image(data=cards.preview_jpeg(png), format="jpeg")]

@@ -9,7 +9,7 @@ Claude does the writing itself, so there are no AI API keys to manage. This repo
 - **Title-card images**, rendered locally (no image API).
 - **Skills** that teach Claude your posting workflow and writing style: `/linkedin:plan` and `/linkedin:write`.
 
-It works as a **Claude Code plugin** and as a **Claude Desktop connector**.
+It works as a **Claude Code plugin** and as a **Claude Desktop connector**, both running locally on your computer. It can also be hosted on Google Cloud Run as a **claude.ai custom connector**, so it works on the web and on mobile; see [Hosted mode](#hosted-mode).
 
 ```
 You: plan 30 days of posts about AI strategy for small businesses
@@ -70,7 +70,7 @@ Edit `claude_desktop_config.json`. On Windows it's at `%APPDATA%\Claude\`; on ma
   "mcpServers": {
     "linkedin": {
       "command": "uv",
-      "args": ["run", "--directory", "C:/path/to/LinkedIn-Automation", "--quiet", "linkedin-mcp"]
+      "args": ["run", "--directory", "C:/path/to/LinkedIn-Automation", "--no-dev", "--quiet", "linkedin-mcp"]
     }
   }
 }
@@ -119,7 +119,7 @@ Scheduled posts go out when `publish_due` runs. Claude runs it if you ask; to ma
 
 ```powershell
 $action  = New-ScheduledTaskAction -Execute "$env:USERPROFILE\.local\bin\uvw.exe" `
-           -Argument 'run --directory "C:\path\to\LinkedIn-Automation" --quiet linkedin-mcp publish-due'
+           -Argument 'run --directory "C:\path\to\LinkedIn-Automation" --no-dev --quiet linkedin-mcp publish-due'
 $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 15)
 Register-ScheduledTask -TaskName "LinkedIn publish-due" -Action $action -Trigger $trigger
 ```
@@ -129,7 +129,7 @@ Register-ScheduledTask -TaskName "LinkedIn publish-due" -Action $action -Trigger
 **macOS / Linux** (`crontab -e`):
 
 ```
-*/15 * * * * cd /path/to/LinkedIn-Automation && uv run --quiet linkedin-mcp publish-due
+*/15 * * * * cd /path/to/LinkedIn-Automation && uv run --no-dev --quiet linkedin-mcp publish-due
 ```
 
 If a scheduled post fails (for example because the token expired), it is marked `failed` with the error and never retried silently. Ask Claude to reschedule it.
@@ -147,7 +147,11 @@ Settings are read from the environment first, then from `~/.linkedin-mcp/.env`. 
 | `POSTING_TIME` | `10:00` | Time used when only a date is given |
 | `LINKEDIN_API_VERSION` | `202610` | LinkedIn REST version (`YYYYMM`); versions expire after about a year |
 | `LINKEDIN_ACCESS_TOKEN` | | Use an existing token instead of logging in |
-| `LINKEDIN_DATA_DIR` | `~/.linkedin-mcp` | Where everything below lives |
+| `LINKEDIN_DATA_DIR` | `~/.linkedin-mcp` | Where everything below lives (local mode) |
+| `STORAGE` | `sqlite` | `firestore` in hosted mode |
+| `IMAGES_BUCKET` | | Hosted mode: Cloud Storage bucket for title cards |
+| `MCP_PATH_SECRET`, `PUBLISH_DUE_SECRET` | | Hosted mode: 32+ random characters each, from Secret Manager |
+| `FIRESTORE_DATABASE` | `(default)` | Hosted mode: Firestore database name |
 
 Data directory:
 
@@ -160,13 +164,52 @@ Data directory:
 └── linkedin-mcp.log   log, including scheduled publishing runs
 ```
 
+## Hosted mode
+
+Claude on the web and mobile can't start programs on your computer, so there the tools need to run on a server. In hosted mode, the same MCP server runs on **Google Cloud Run**:
+
+| | Local mode (default) | Hosted mode |
+|---|---|---|
+| Command | `linkedin-mcp` (stdio) | `linkedin-mcp serve-http` (streamable HTTP on `$PORT`) |
+| Calendar and login | `~/.linkedin-mcp` (SQLite, `credentials.json`) | Firestore (`STORAGE=firestore`) |
+| Title cards | `~/.linkedin-mcp/images` | Cloud Storage bucket (`IMAGES_BUCKET`) |
+| LinkedIn login | Local callback on `localhost:8000` | The service's own `/callback` (`LINKEDIN_REDIRECT_URI`) |
+| Scheduled posts | OS scheduled task | Cloud Scheduler calls `/internal/publish-due` every 15 min |
+
+**Security**
+- Only you can use the connector. Its URL contains a long random secret (`/mcp/<MCP_PATH_SECRET>`, stored in Secret Manager), and every other URL returns 404.
+- The scheduler endpoint is POST-only and needs a separate secret header (`X-Publish-Due-Secret`).
+- The app never logs secrets, tokens or request paths.
+- The approval rule is unchanged. Claude only publishes after you approve the exact text, and the scheduler only publishes posts you approved with `schedule_post`. Drafts are never published.
+
+**Deploy:** follow [deploy.md](deploy.md). It has every `gcloud` command: APIs, Firestore, the bucket, secrets, Cloud Run (0–1 instances), Cloud Scheduler and a $5 budget alert. At the end it prints your connector URL.
+
+**Add the connector in claude.ai**
+1. Open **Settings → Connectors**. In newer versions this is **Customize → Connectors**.
+2. Click **Add custom connector**.
+3. Name it `LinkedIn` and paste the URL: `https://<your-service>.run.app/mcp/<MCP_PATH_SECRET>`. Leave the OAuth fields empty.
+4. Click **Add**, then turn the connector on in a chat from the tools menu.
+5. Ask Claude to *"connect my LinkedIn account"* and open the login link it gives you.
+
+For the writing style and the `/linkedin:plan` and `/linkedin:write` skills on claude.ai, add this repo under **Customize → Plugins → Add marketplace**. Chat loads the plugin's skills; the hosted connector provides the tools.
+
+Anyone who has the connector URL can use it as you, so keep it private. If it leaks, rotate the secret (see deploy.md).
+
 ## Development
 
 ```bash
-uv sync                          # create .venv
+uv sync --extra hosted           # create .venv, including the hosted-mode dependencies
+uv run pytest                    # tests (secret path, publish-due endpoint, OAuth state)
 uv run linkedin-mcp status       # check the connection and calendar from the terminal
 claude --plugin-dir .            # try the plugin; /reload-plugins after edits
 claude plugin validate .         # check the plugin and marketplace manifests
 ```
 
-Code lives in `src/linkedin_mcp/`: `server.py` (MCP tools), `linkedin.py` (API client), `auth.py` (OAuth login), `store.py` (calendar), `cards.py` (images) and `config.py` (settings).
+Code lives in `src/linkedin_mcp/`:
+- `server.py`: MCP tools
+- `http_app.py`: hosted HTTP app
+- `linkedin.py`: API client
+- `auth.py`: OAuth login
+- `store.py`: calendar, backed by `sqlite_store.py` or `firestore_store.py`
+- `cards.py` and `images.py`: title cards and image storage
+- `config.py`: settings

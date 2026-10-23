@@ -5,18 +5,17 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 import httpx
 
+from . import images
 from .config import Credentials, get_settings, load_credentials
 from .errors import LinkedInError
 
 logger = logging.getLogger(__name__)
 
 API_BASE = "https://api.linkedin.com"
-IMAGE_TYPES = {".png", ".jpg", ".jpeg", ".gif"}
 TIMEOUT = httpx.Timeout(60.0, connect=15.0)
 
 # The Posts API reads `commentary` as LinkedIn's "little" text format, where these
@@ -100,17 +99,7 @@ def _author_urn(credentials: Credentials) -> str:
     return author
 
 
-def check_image(image_path: str) -> Path:
-    """Validate that a path points to an image LinkedIn accepts."""
-    path = Path(image_path).expanduser().resolve()
-    if not path.is_file():
-        raise LinkedInError(f"Image not found: {path}")
-    if path.suffix.lower() not in IMAGE_TYPES:
-        raise LinkedInError(f"Unsupported image type {path.suffix!r}; use PNG, JPG or GIF.")
-    return path
-
-
-def _upload_image(headers: dict[str, str], owner: str, image: Path) -> str:
+def _upload_image(headers: dict[str, str], owner: str, image: bytes) -> str:
     """Upload an image and return its URN for use in a post."""
     init = request(
         "POST",
@@ -126,7 +115,7 @@ def _upload_image(headers: dict[str, str], owner: str, image: Path) -> str:
         value["uploadUrl"],
         "image upload",
         headers={"Authorization": headers["Authorization"]},
-        content=image.read_bytes(),
+        content=image,
     )
     return value["image"]
 
@@ -135,7 +124,7 @@ def publish(text: str, image_path: str = "") -> PublishedPost:
     """Publish text (and an optional image) as a public LinkedIn post."""
     credentials = _require_credentials()
     author = _author_urn(credentials)
-    image = check_image(image_path) if image_path else None
+    image = images.load(images.validate(image_path)) if image_path else None
     headers = {
         "Authorization": f"Bearer {credentials.access_token}",
         "LinkedIn-Version": get_settings().api_version,

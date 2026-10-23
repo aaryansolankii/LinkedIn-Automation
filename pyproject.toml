@@ -11,8 +11,23 @@ dependencies = [
     "python-dotenv>=1.0",
 ]
 
+[project.optional-dependencies]
+# Hosted mode (Cloud Run): Firestore storage, Cloud Storage images, HTTP server.
+hosted = [
+    "google-cloud-firestore>=2.20",
+    "google-cloud-storage>=3.0",
+    "starlette>=0.40",
+    "uvicorn>=0.30",
+]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
 [project.scripts]
 linkedin-mcp = "linkedin_mcp.__main__:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
 
 [build-system]
 requires = ["uv_build>=0.8,<0.14"]

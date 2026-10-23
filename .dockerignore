@@ -1,0 +1,13 @@
+# Only pyproject.toml, uv.lock, README.md and src/ are needed in the image.
+.git
+.venv
+**/__pycache__
+**/*.py[cod]
+.env
+.env.*
+.claude-plugin
+skills
+tests
+deploy.md
+Dockerfile
+.dockerignore
