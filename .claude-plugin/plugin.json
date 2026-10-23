@@ -1,0 +1,16 @@
+{
+  "name": "linkedin",
+  "version": "1.0.0",
+  "description": "Plan, write, schedule and publish LinkedIn posts from Claude: LinkedIn publishing tools, a content calendar, title-card images, and skills for planning and writing posts.",
+  "author": {
+    "name": "aaryansolankii"
+  },
+  "repository": "https://github.com/aaryansolankii/LinkedIn-Automation",
+  "keywords": ["linkedin", "social-media", "content-calendar", "mcp"],
+  "mcpServers": {
+    "linkedin": {
+      "command": "uv",
+      "args": ["run", "--directory", "${CLAUDE_PLUGIN_ROOT}", "--quiet", "linkedin-mcp"]
+    }
+  }
+}

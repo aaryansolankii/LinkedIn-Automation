@@ -1,0 +1,16 @@
+# Secrets (the app itself keeps its settings, login and calendar in ~/.linkedin-mcp)
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+build/
+dist/
+*.egg-info/
+
+# OS
+.DS_Store
+Thumbs.db

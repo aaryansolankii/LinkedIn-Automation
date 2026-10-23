@@ -1,0 +1,14 @@
+{
+  "name": "linkedin-automation",
+  "owner": {
+    "name": "aaryansolankii"
+  },
+  "description": "LinkedIn automation for Claude Code.",
+  "plugins": [
+    {
+      "name": "linkedin",
+      "source": "./",
+      "description": "Plan, write, schedule and publish LinkedIn posts from Claude."
+    }
+  ]
+}

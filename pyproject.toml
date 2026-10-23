@@ -1,0 +1,19 @@
+[project]
+name = "linkedin-mcp"
+version = "1.0.0"
+description = "LinkedIn publishing and content-calendar tools for Claude (MCP server)."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "mcp>=2.3,<3",
+    "httpx>=0.28",
+    "pillow>=11",
+    "python-dotenv>=1.0",
+]
+
+[project.scripts]
+linkedin-mcp = "linkedin_mcp.__main__:main"
+
+[build-system]
+requires = ["uv_build>=0.8,<0.14"]
+build-backend = "uv_build"
