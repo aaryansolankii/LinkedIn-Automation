@@ -9,13 +9,15 @@ dependencies = [
     "httpx>=0.28",
     "pillow>=11",
     "python-dotenv>=1.0",
+    "resvg-py>=0.5,<0.6",
 ]
 
 [project.optional-dependencies]
-# Hosted mode (Cloud Run): Firestore storage, Cloud Storage images, HTTP server.
+# Hosted mode (Cloud Run): Firestore storage, Cloud Storage images, HTTP server, Google sign-in.
 hosted = [
     "google-cloud-firestore>=2.20",
     "google-cloud-storage>=3.0",
+    "pyjwt[crypto]>=2.10",
     "starlette>=0.40",
     "uvicorn>=0.30",
 ]

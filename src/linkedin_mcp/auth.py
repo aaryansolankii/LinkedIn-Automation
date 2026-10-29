@@ -52,10 +52,16 @@ def page(heading: str, message: str) -> str:
 
 
 def _require_app(settings: Settings) -> None:
-    """Explain the one-time developer-app setup when its credentials are missing."""
+    """Explain the one-time developer-app setup when its credentials are missing, and refuse member
+    posting rights in page-only mode."""
     if not (settings.client_id and settings.client_secret):
         where = "as Cloud Run env var / secret (see deploy.md)" if is_hosted() else f"in {ENV_FILE}"
         raise LinkedInError(SETUP_HELP.format(redirect_uri=settings.redirect_uri, where=where))
+    if settings.page_only and "w_member_social" in settings.scopes.split():
+        raise LinkedInError(
+            "PAGE_ONLY is on, so linkedin_login won't ask for w_member_social (permission to post as yourself). "
+            "Remove it from LINKEDIN_SCOPES, e.g. LINKEDIN_SCOPES=w_organization_social r_organization_social."
+        )
 
 
 def authorize_url(settings: Settings, state: str) -> str:

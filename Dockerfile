@@ -1,7 +1,9 @@
 # Hosted mode image for Cloud Run: `linkedin-mcp serve-http` on $PORT. See deploy.md.
 FROM python:3.13-slim
 
-# Fonts for the title cards and time-zone data so TZ (e.g. Asia/Kolkata) is honoured.
+# System fonts for make_post_image's title cards and time-zone data so TZ (e.g. Asia/Kolkata) is honoured.
+# make_branded_image needs no system packages: resvg comes as a Python wheel (resvg-py) and its
+# fonts (Poppins, Inter) and the StatSigma logos are copied from assets/ below.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends fonts-dejavu-core tzdata \
  && rm -rf /var/lib/apt/lists/*
@@ -18,6 +20,7 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --extra hosted --no-install-project
 
 COPY README.md ./
+COPY assets ./assets
 COPY src ./src
 RUN uv sync --frozen --no-dev --extra hosted
 

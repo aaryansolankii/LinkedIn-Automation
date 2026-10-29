@@ -1,5 +1,6 @@
-# Only pyproject.toml, uv.lock, README.md and src/ are needed in the image.
+# Only pyproject.toml, uv.lock, README.md, assets/ and src/ are needed in the image.
 .git
+reference
 .venv
 **/__pycache__
 **/*.py[cod]

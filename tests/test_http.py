@@ -1,57 +1,53 @@
-"""Hosted mode: only the secret MCP path is served, and publish-due only posts approved posts."""
-
-import logging
-import secrets
+"""Hosted mode: what is served, startup checks, and publish-due only posting approved posts."""
 
 import pytest
-from starlette.testclient import TestClient
+from conftest import ISSUER, PUBLISH_SECRET, SIGNING_KEY
 
-from linkedin_mcp import linkedin, store
+from linkedin_mcp import linkedin, oauth, store
 from linkedin_mcp.http_app import PUBLISH_SECRET_HEADER, build_app
 
-PATH_SECRET = secrets.token_urlsafe(32)
-PUBLISH_SECRET = secrets.token_urlsafe(32)
-MCP_HEADERS = {"Accept": "application/json, text/event-stream", "Content-Type": "application/json"}
-INITIALIZE = {
-    "jsonrpc": "2.0",
-    "id": 1,
-    "method": "initialize",
-    "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "test", "version": "1"}},
-}
 
-
-@pytest.fixture
-def client():
-    with TestClient(build_app(PATH_SECRET, PUBLISH_SECRET)) as test_client:
-        yield test_client
-
-
-def test_mcp_is_served_only_on_the_secret_path(client, caplog):
-    caplog.set_level(logging.DEBUG)
-    response = client.post(f"/mcp/{PATH_SECRET}", json=INITIALIZE, headers=MCP_HEADERS)
-    assert response.status_code == 200
-    assert response.json()["result"]["serverInfo"]["name"] == "linkedin"
-
-    for path in ["/", "/mcp", "/mcp/", "/mcp/wrong", f"/mcp/{PATH_SECRET[:-1]}", f"/mcp/{PATH_SECRET}x", "/docs"]:
-        assert client.post(path, json=INITIALIZE, headers=MCP_HEADERS).status_code == 404, path
+def test_only_known_routes_are_served(client):
+    for path in ["/", "/mcp/anything", "/mcp/" + SIGNING_KEY, "/docs", "/oauth/google"]:
         assert client.get(path).status_code == 404, path
-
-    # The test's own HTTP client (httpx) logs the URLs it requests; the server must never log them.
-    server_logs = [record.getMessage() for record in caplog.records if not record.name.startswith("httpx")]
-    assert server_logs and not any(PATH_SECRET in message for message in server_logs)
+    assert client.get("/token").status_code == 404  # wrong method
 
 
-def test_weak_or_reused_secrets_are_refused():
+def test_oauth_metadata_points_claude_at_this_service(client):
+    for path in ["/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/mcp"]:
+        metadata = client.get(path).json()
+        assert metadata["resource"] == f"{ISSUER}/mcp"
+        assert metadata["authorization_servers"] == [ISSUER]
+
+    metadata = client.get("/.well-known/oauth-authorization-server").json()
+    assert metadata["issuer"] == ISSUER
+    for endpoint in ("authorization", "token", "registration", "revocation"):
+        assert metadata[f"{endpoint}_endpoint"].startswith(ISSUER + "/")
+    assert metadata["code_challenge_methods_supported"] == ["S256"]
+
+
+def test_startup_refuses_weak_reused_or_missing_settings(provider, monkeypatch):
     with pytest.raises(RuntimeError):
-        build_app("too-short", PUBLISH_SECRET)
+        build_app("too-short", provider)
     with pytest.raises(RuntimeError):
-        build_app(PATH_SECRET, PATH_SECRET)
+        build_app(SIGNING_KEY, provider)  # same value as OAUTH_SIGNING_KEY
+
+    for name in ("OAUTH_ISSUER_URL", "GOOGLE_OAUTH_CLIENT_ID", "GOOGLE_OAUTH_CLIENT_SECRET", "ALLOWED_EMAILS", "OAUTH_SIGNING_KEY"):
+        monkeypatch.delenv(name, raising=False)
+    with pytest.raises(RuntimeError, match="OAUTH_ISSUER_URL"):
+        build_app(PUBLISH_SECRET)
+    for bad in [("http://connector.example", "a@b.c", SIGNING_KEY), (ISSUER + "/mcp", "a@b.c", SIGNING_KEY),
+                (ISSUER, " , ", SIGNING_KEY), (ISSUER, "a@b.c", "short")]:
+        issuer, emails, key = bad
+        with pytest.raises(RuntimeError):
+            oauth.OAuthConfig.create(issuer, "id", "secret", emails, key)
 
 
 def test_publish_due_requires_post_and_the_secret_header(client):
     assert client.post("/internal/publish-due").status_code == 404
     assert client.post("/internal/publish-due", headers={PUBLISH_SECRET_HEADER: "wrong"}).status_code == 404
-    assert client.post("/internal/publish-due", headers={PUBLISH_SECRET_HEADER: PATH_SECRET}).status_code == 404
+    assert client.post("/internal/publish-due", headers={PUBLISH_SECRET_HEADER: SIGNING_KEY}).status_code == 404
+    assert client.post("/internal/publish-due", headers={"Authorization": f"Bearer {PUBLISH_SECRET}"}).status_code == 404
     assert client.get("/internal/publish-due", headers={PUBLISH_SECRET_HEADER: PUBLISH_SECRET}).status_code == 404
     assert client.post("/internal/publish-due", headers={PUBLISH_SECRET_HEADER: PUBLISH_SECRET}).status_code == 200
 
@@ -82,7 +78,7 @@ def test_publish_due_publishes_only_approved_posts_that_are_due(client, monkeypa
     assert store.get_post(later["id"])["status"] == "scheduled"
 
 
-def test_callback_rejects_unsigned_state(client, monkeypatch):
+def test_linkedin_callback_rejects_unsigned_state(client, monkeypatch):
     exchanged = []
     monkeypatch.setattr("linkedin_mcp.auth.exchange_code", lambda *args: exchanged.append(args))
     for state in ["", "garbage", "9999999999.nonce.forged-signature"]:

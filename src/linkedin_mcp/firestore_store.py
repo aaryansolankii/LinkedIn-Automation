@@ -1,7 +1,9 @@
-"""Firestore backend for the content calendar and the LinkedIn login (hosted mode).
+"""Firestore backend for the content calendar, the LinkedIn login and the connector's OAuth records (hosted mode).
 
 Posts are documents in `posts/<id>` with the same fields as the SQLite rows. Ids stay
 small integers (allocated from `meta/counters`) so tools keep using numeric post ids.
+
+OAuth records (see oauth.py) live in `oauth_<kind>/<sha256 of the code, token or client id>`.
 """
 
 from __future__ import annotations
@@ -89,3 +91,39 @@ def load_credentials() -> dict[str, str]:
 def save_credentials(data: dict[str, str]) -> None:
     """Replace the saved LinkedIn login."""
     _db().collection(_CREDENTIALS[0]).document(_CREDENTIALS[1]).set(data)
+
+
+def _oauth(kind: str) -> firestore.CollectionReference:
+    return _db().collection(f"oauth_{kind}")
+
+
+def oauth_put(kind: str, key: str, data: dict[str, Any]) -> None:
+    """Create or replace an OAuth record."""
+    _oauth(kind).document(key).set(data)
+
+
+def oauth_get(kind: str, key: str) -> dict[str, Any] | None:
+    """Return an OAuth record, or None."""
+    snapshot = _oauth(kind).document(key).get()
+    return snapshot.to_dict() if snapshot.exists else None
+
+
+def oauth_take(kind: str, key: str) -> dict[str, Any] | None:
+    """Delete an OAuth record and return it, atomically, so a one-time code or token works only once."""
+    ref = _oauth(kind).document(key)
+
+    @firestore.transactional
+    def take(transaction: firestore.Transaction) -> dict[str, Any] | None:
+        snapshot = ref.get(transaction=transaction)
+        if not snapshot.exists:
+            return None
+        transaction.delete(ref)
+        return snapshot.to_dict()
+
+    return take(_db().transaction())
+
+
+def oauth_delete_where(kind: str, field: str, value: str) -> None:
+    """Delete every OAuth record whose `field` equals `value` (e.g. all tokens of one sign-in)."""
+    for snapshot in _oauth(kind).where(filter=firestore.FieldFilter(field, "==", value)).stream():
+        snapshot.reference.delete()

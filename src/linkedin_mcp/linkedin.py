@@ -122,12 +122,18 @@ def _upload_image(headers: dict[str, str], owner: str, image: bytes) -> str:
 
 def publish(text: str, image_path: str = "") -> PublishedPost:
     """Publish text (and an optional image) as a public LinkedIn post."""
+    settings = get_settings()
     credentials = _require_credentials()
     author = _author_urn(credentials)
+    if settings.page_only and not author.startswith("urn:li:organization:"):
+        raise LinkedInError(
+            f"PAGE_ONLY is on, so posts can only go out as a company page (urn:li:organization:...), "
+            f"not as {author}. Set LINKEDIN_AUTHOR_URN to the page's URN."
+        )
     image = images.load(images.validate(image_path)) if image_path else None
     headers = {
         "Authorization": f"Bearer {credentials.access_token}",
-        "LinkedIn-Version": get_settings().api_version,
+        "LinkedIn-Version": settings.api_version,
         "X-Restli-Protocol-Version": "2.0.0",
     }
 

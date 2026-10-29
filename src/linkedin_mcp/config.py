@@ -47,6 +47,7 @@ class Settings:
     api_version: str
     posting_time: str
     author_urn: str
+    page_only: bool = False  # only ever post as a company page (urn:li:organization:...)
 
 
 def get_settings() -> Settings:
@@ -59,6 +60,7 @@ def get_settings() -> Settings:
         api_version=_env("LINKEDIN_API_VERSION", "202610"),
         posting_time=_env("POSTING_TIME", "10:00"),
         author_urn=_env("LINKEDIN_AUTHOR_URN"),
+        page_only=_env("PAGE_ONLY").lower() in ("1", "true", "yes", "on"),
     )
 
 

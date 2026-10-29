@@ -1,12 +1,16 @@
-"""Hosted mode: the MCP server over streamable HTTP, plus the OAuth callback and the scheduler hook.
+"""Hosted mode: the MCP server over streamable HTTP behind OAuth sign-in, plus LinkedIn's callback and the scheduler hook.
 
 Routes (everything else is a plain 404):
-  /mcp/<MCP_PATH_SECRET>   MCP endpoint for the claude.ai custom connector
-  /callback                LinkedIn's OAuth redirect (state is HMAC-signed, see auth.py)
-  /internal/publish-due    POST with the X-Publish-Due-Secret header; publishes approved posts that are due
+  /mcp                                     MCP endpoint for the claude.ai connector; needs a bearer token
+  /.well-known/oauth-protected-resource    where to sign in for /mcp (also served at .../mcp)
+  /.well-known/oauth-authorization-server  OAuth metadata for claude.ai
+  /register, /authorize, /token, /revoke   OAuth endpoints (MCP SDK handlers, oauth.AllowListProvider)
+  /oauth/google/callback                   Google's redirect; only ALLOWED_EMAILS get an authorization code
+  /callback                                LinkedIn's OAuth redirect (state is HMAC-signed, see auth.py)
+  /internal/publish-due                    POST with the X-Publish-Due-Secret header; publishes approved posts that are due
 
-Secrets are only ever compared, never logged; run uvicorn with access_log=False so request
-paths (which contain the MCP secret) don't reach the logs either.
+Secrets, codes and tokens are only ever compared or hashed, never logged; run uvicorn with
+access_log=False so request URLs (which carry one-time codes) don't reach the logs either.
 """
 
 from __future__ import annotations
@@ -17,17 +21,21 @@ import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+from mcp.server.auth.middleware.auth_context import AuthContextMiddleware
+from mcp.server.auth.middleware.bearer_auth import BearerAuthBackend, RequireAuthMiddleware
+from mcp.server.auth.provider import ProviderTokenVerifier
+from mcp.server.auth.routes import build_resource_metadata_url, create_auth_routes, create_protected_resource_routes
+from mcp.server.streamable_http_manager import StreamableHTTPASGIApp
 from starlette.applications import Starlette
 from starlette.concurrency import run_in_threadpool
+from starlette.middleware.authentication import AuthenticationMiddleware
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
 from starlette.routing import Route
-from starlette.types import Receive, Scope, Send
 
-from . import auth
+from . import auth, oauth
 from .server import mcp, publish_due
 
-MIN_SECRET_LENGTH = 32
 PUBLISH_SECRET_HEADER = "X-Publish-Due-Secret"
 
 
@@ -40,32 +48,44 @@ async def _not_found(request: Request, exc: Exception | None = None) -> Response
     return PlainTextResponse("Not Found", status_code=404)
 
 
-class _SecretPathMCP:
-    """ASGI endpoint that hands the request to MCP only when the path token is the secret."""
-
-    def __init__(self, secret: bytes) -> None:
-        self._secret = secret
-
-    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if _matches(scope["path_params"].get("token", ""), self._secret):
-            await mcp.session_manager.asgi_app(scope, receive, send)
-        else:
-            await PlainTextResponse("Not Found", status_code=404)(scope, receive, send)
-
-
-def build_app(path_secret: str | None = None, publish_secret: str | None = None) -> Starlette:
-    """Build the hosted ASGI app; secrets default to the MCP_PATH_SECRET / PUBLISH_DUE_SECRET env vars."""
-    path_secret = path_secret if path_secret is not None else os.environ.get("MCP_PATH_SECRET", "")
+def build_app(publish_secret: str | None = None, provider: oauth.AllowListProvider | None = None) -> Starlette:
+    """Build the hosted ASGI app; settings default to the environment (PUBLISH_DUE_SECRET, OAUTH_*, GOOGLE_OAUTH_*, ALLOWED_EMAILS)."""
     publish_secret = publish_secret if publish_secret is not None else os.environ.get("PUBLISH_DUE_SECRET", "")
-    for name, value in (("MCP_PATH_SECRET", path_secret), ("PUBLISH_DUE_SECRET", publish_secret)):
-        if len(value) < MIN_SECRET_LENGTH:
-            raise RuntimeError(f"{name} must be a random value of at least {MIN_SECRET_LENGTH} characters.")
-    if path_secret == publish_secret:
-        raise RuntimeError("MCP_PATH_SECRET and PUBLISH_DUE_SECRET must be different.")
+    if len(publish_secret) < oauth.MIN_SECRET_LENGTH:
+        raise RuntimeError(f"PUBLISH_DUE_SECRET must be a random value of at least {oauth.MIN_SECRET_LENGTH} characters.")
+    provider = provider or oauth.AllowListProvider(oauth.OAuthConfig.from_env(), oauth.default_store())
+    config = provider.config
+    if _matches(config.signing_key, publish_secret.encode()):
+        raise RuntimeError("OAUTH_SIGNING_KEY and PUBLISH_DUE_SECRET must be different.")
 
-    auth.enable_hosted_login(hmac.new(path_secret.encode(), b"linkedin-oauth-state", hashlib.sha256).digest())
+    auth.enable_hosted_login(hmac.new(config.signing_key.encode(), b"linkedin-oauth-state", hashlib.sha256).digest())
     # Stateless JSON responses suit Cloud Run: no session survives scale-to-zero anyway.
     mcp.streamable_http_app(json_response=True, stateless_http=True, host="0.0.0.0")
+
+    # The same pieces MCPServer.streamable_http_app wires up when given `auth=` and `auth_server_provider=`.
+    settings = config.auth_settings()
+    assert settings.resource_server_url is not None
+    resource_metadata_url = build_resource_metadata_url(settings.resource_server_url)
+    mcp_endpoint = AuthenticationMiddleware(
+        AuthContextMiddleware(
+            RequireAuthMiddleware(StreamableHTTPASGIApp(mcp.session_manager), settings.required_scopes or [], resource_metadata_url)
+        ),
+        backend=BearerAuthBackend(ProviderTokenVerifier(provider), resource_server_url=settings.resource_server_url),
+    )
+    auth_routes = create_auth_routes(
+        provider,
+        settings.issuer_url,
+        client_registration_options=settings.client_registration_options,
+        revocation_options=settings.revocation_options,
+    )
+    resource_routes = create_protected_resource_routes(settings.resource_server_url, [settings.issuer_url])
+    # Clients that don't follow the WWW-Authenticate hint look for the metadata at the root path too.
+    resource_routes.append(
+        Route("/.well-known/oauth-protected-resource", endpoint=resource_routes[0].endpoint, methods=["GET", "OPTIONS"])
+    )
+
+    async def google_callback(request: Request) -> Response:
+        return await run_in_threadpool(provider.complete_google_login, dict(request.query_params))
 
     async def callback(request: Request) -> Response:
         status, heading, message = await run_in_threadpool(auth.complete_hosted_login, dict(request.query_params))
@@ -85,7 +105,10 @@ def build_app(path_secret: str | None = None, publish_secret: str | None = None)
 
     return Starlette(
         routes=[
-            Route("/mcp/{token}", endpoint=_SecretPathMCP(path_secret.encode())),
+            Route(oauth.MCP_PATH, endpoint=mcp_endpoint),
+            *auth_routes,
+            *resource_routes,
+            Route(oauth.GOOGLE_CALLBACK_PATH, google_callback, methods=["GET"]),
             Route("/callback", callback, methods=["GET"]),
             Route("/internal/publish-due", publish_due_hook, methods=["GET", "POST", "PUT", "PATCH", "DELETE"]),
         ],

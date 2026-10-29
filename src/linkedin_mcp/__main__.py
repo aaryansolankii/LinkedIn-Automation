@@ -49,7 +49,7 @@ def main() -> None:
 
                 from .http_app import build_app
 
-                # access_log=False: request paths contain the MCP secret and must never be logged.
+                # access_log=False: OAuth redirect URLs carry one-time codes and must never be logged.
                 uvicorn.run(
                     build_app(),
                     host="0.0.0.0",
