@@ -13,7 +13,7 @@ description: Write, review, schedule and publish LinkedIn posts in the user's vo
 2. **Write** the post, following the style guide below.
 3. **Save** it with `save_post`. Pass `post_id` when the post comes from a planned idea.
 4. **Show** the user the exact text inside a plain code block, so nothing gets rendered, along with the word count and planned time.
-5. **Image (optional).** If the user wants one, call `make_post_image` with a headline of 10 words or fewer and `post_id` to attach it. To attach the user's own image, use `save_post(image_path=...)`.
+5. **Image (optional).** If the user wants one, call `make_branded_image` for a StatSigma-branded image: draw an illustration of the post's key idea as SVG (the tool's description says how), pick a headline of 10 words or fewer, and pass `post_id` to attach it. `make_post_image` makes a plain title card instead. To attach the user's own image, use `save_post(image_path=...)`.
 6. **Revise** until the user is happy. Every revision goes through `save_post`.
 7. **Publish** only after an explicit go-ahead for that exact text:
    - `schedule_post` publishes at the planned time. Use it when the user names a time, or keep the planned one if it is in the future.

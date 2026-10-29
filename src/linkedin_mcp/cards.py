@@ -3,15 +3,10 @@
 from __future__ import annotations
 
 import io
-import uuid
 from dataclasses import dataclass
-from datetime import datetime
 from functools import cache
-from pathlib import Path
 
 from PIL import Image, ImageColor, ImageDraw, ImageFont
-
-from .config import IMAGES_DIR
 
 SIZE = 1200  # square: takes the most room in the LinkedIn feed
 MARGIN = 96
@@ -82,8 +77,8 @@ def _fit_title(draw: ImageDraw.ImageDraw, title: str, width: int, max_height: in
     return font, lines
 
 
-def render_title_card(title: str, subtitle: str = "", eyebrow: str = "", author: str = "", theme: str = "sky") -> Path:
-    """Render a square title card PNG into the images folder and return its path."""
+def render_title_card(title: str, subtitle: str = "", eyebrow: str = "", author: str = "", theme: str = "sky") -> bytes:
+    """Render a square title card and return it as PNG bytes."""
     colors = THEMES[theme]
     width = SIZE - 2 * MARGIN
 
@@ -124,15 +119,14 @@ def render_title_card(title: str, subtitle: str = "", eyebrow: str = "", author:
         draw.ellipse((MARGIN, SIZE - 128, MARGIN + 20, SIZE - 108), fill=colors.accent)
         draw.text((MARGIN + 36, SIZE - 140), author, font=_font("semibold", 34), fill=colors.text)
 
-    IMAGES_DIR.mkdir(parents=True, exist_ok=True)
-    path = IMAGES_DIR / f"card_{datetime.now():%Y%m%d_%H%M%S}_{uuid.uuid4().hex[:6]}.png"
-    card.convert("RGB").save(path, "PNG", optimize=True)
-    return path
+    buffer = io.BytesIO()
+    card.convert("RGB").save(buffer, "PNG", optimize=True)
+    return buffer.getvalue()
 
 
-def preview_jpeg(path: Path, max_side: int = 640) -> bytes:
+def preview_jpeg(png: bytes, max_side: int = 640) -> bytes:
     """Return a small JPEG preview of an image (keeps the tool result light)."""
-    with Image.open(path) as image:
+    with Image.open(io.BytesIO(png)) as image:
         image = image.convert("RGB")
         image.thumbnail((max_side, max_side))
         buffer = io.BytesIO()

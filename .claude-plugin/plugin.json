@@ -1,7 +1,7 @@
 {
   "name": "linkedin",
   "version": "1.0.0",
-  "description": "Plan, write, schedule and publish LinkedIn posts from Claude: LinkedIn publishing tools, a content calendar, title-card images, and skills for planning and writing posts.",
+  "description": "Plan, write, schedule and publish LinkedIn posts from Claude: LinkedIn publishing tools, a content calendar, post images, and skills for planning and writing posts.",
   "author": {
     "name": "aaryansolankii"
   },
@@ -10,7 +10,7 @@
   "mcpServers": {
     "linkedin": {
       "command": "uv",
-      "args": ["run", "--directory", "${CLAUDE_PLUGIN_ROOT}", "--quiet", "linkedin-mcp"]
+      "args": ["run", "--directory", "${CLAUDE_PLUGIN_ROOT}", "--no-dev", "--quiet", "linkedin-mcp"]
     }
   }
 }

@@ -19,6 +19,12 @@ CREDENTIALS_FILE = DATA_DIR / "credentials.json"
 IMAGES_DIR = DATA_DIR / "images"
 LOG_FILE = DATA_DIR / "linkedin-mcp.log"
 
+# Deployment switches: unset locally, set on Cloud Run (see deploy.md).
+STORAGE = os.environ.get("STORAGE", "sqlite").strip().lower()  # "sqlite" or "firestore"
+IMAGES_BUCKET = os.environ.get("IMAGES_BUCKET", "").strip()  # Cloud Storage bucket for title cards
+if STORAGE not in ("sqlite", "firestore"):
+    raise RuntimeError(f"STORAGE must be 'sqlite' or 'firestore', not {STORAGE!r}.")
+
 
 def _env(name: str, default: str = "") -> str:
     """Read a setting from the process environment, then DATA_DIR/.env.
@@ -41,6 +47,7 @@ class Settings:
     api_version: str
     posting_time: str
     author_urn: str
+    page_only: bool = False  # only ever post as a company page (urn:li:organization:...)
 
 
 def get_settings() -> Settings:
@@ -53,6 +60,7 @@ def get_settings() -> Settings:
         api_version=_env("LINKEDIN_API_VERSION", "202610"),
         posting_time=_env("POSTING_TIME", "10:00"),
         author_urn=_env("LINKEDIN_AUTHOR_URN"),
+        page_only=_env("PAGE_ONLY").lower() in ("1", "true", "yes", "on"),
     )
 
 
@@ -72,9 +80,7 @@ class Credentials:
 
 def load_credentials() -> Credentials | None:
     """Return saved login credentials, with env overrides applied, or None."""
-    saved: dict[str, str] = {}
-    if CREDENTIALS_FILE.exists():
-        saved = json.loads(CREDENTIALS_FILE.read_text(encoding="utf-8"))
+    saved = _saved_credentials()
 
     # A token or author set explicitly (e.g. an organization page URN) wins over the login.
     token = _env("LINKEDIN_ACCESS_TOKEN") or saved.get("access_token", "")
@@ -90,8 +96,24 @@ def load_credentials() -> Credentials | None:
     )
 
 
+def _saved_credentials() -> dict[str, str]:
+    """Return what the last login saved: from Firestore in hosted mode, else from DATA_DIR."""
+    if STORAGE == "firestore":
+        from . import firestore_store
+
+        return firestore_store.load_credentials()
+    if CREDENTIALS_FILE.exists():
+        return json.loads(CREDENTIALS_FILE.read_text(encoding="utf-8"))
+    return {}
+
+
 def save_credentials(credentials: Credentials) -> None:
-    """Persist login credentials to DATA_DIR, readable only by the current user."""
+    """Persist login credentials: to Firestore in hosted mode, else to DATA_DIR (owner-only)."""
+    if STORAGE == "firestore":
+        from . import firestore_store
+
+        firestore_store.save_credentials(asdict(credentials))
+        return
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     CREDENTIALS_FILE.write_text(json.dumps(asdict(credentials), indent=2), encoding="utf-8")
     CREDENTIALS_FILE.chmod(0o600)
